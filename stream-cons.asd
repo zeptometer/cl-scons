@@ -1,7 +1,7 @@
 (in-package :asdf)
 
 (defsystem stream-cons
-    :description "stream-cons allows you to lazy-seq like scheme,clojure."
+    :description "stream-cons allows you to use lazy-seq"
     :depends-on (iterate)
     :version "0.0.1"
     :author "zeptometer"
