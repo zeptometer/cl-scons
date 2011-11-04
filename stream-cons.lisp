@@ -3,6 +3,7 @@
 	#:iterate)
   (:nicknames #:scons)
   (:export #:scons
+	   #:slist
 	   #:with-scons
 	   #:head
 	   #:tail
@@ -13,6 +14,7 @@
 	   #:srem
 	   #:srem-if
 	   #:filter
+	   #:sappend
 	   #:nils
 	   #:zip
 	   #:nums
@@ -42,6 +44,7 @@
 	(tail (gensym))
 	(kwd (if generate 'generate 'for)))
     `(progn (with ,scons = ,l)
+	    (while (if-first-time ,scons ,tail))
 	    (,kwd (values ,var ,tail) next (if-first-time (funcall ,scons)
 							  (funcall ,tail))))))
 
@@ -50,8 +53,19 @@
   (let ((scons (gensym))
 	(kwd (if generate 'generate 'for)))
     `(progn (with ,scons = ,l)
+	    (while (if-first-time ,scons ,var))
 	    (,kwd (values nil ,var) next (if-first-time (values nil ,scons)
 							(funcall ,var))))))
+
+(defmacro slist (&rest args)
+  (reduce (lambda (x y) `(scons ,x ,y))
+	  args
+	  :from-end t
+	  :initial-value nil))
+
+(defun force-slist (l)
+  (iter (for i in-scons l)
+	(collect i)))
 
 (defun head (l)
   (with-scons (a d) l
@@ -64,9 +78,10 @@
 	      d))
 
 (defun take (n l)
-  (iter (repeat n)
-	(for i in-scons l)
-	(collect i)))
+  (if (zerop n)
+      nil
+      (with-scons (a d) l
+	(scons a (take (1- n) d)))))
 
 (defun snth (n l)
   (iter (repeat (1+ n))
@@ -79,20 +94,29 @@
 	(finally (return i))))
 
 (defun smap (f &rest ls)
-  (scons (apply f (mapcar #'head ls))
-	 (apply #'smap f (mapcar #'tail ls))))
+  (if (some #'null ls)
+      nil
+      (iter (for l in ls)
+	    (for (values a d) next (force l))
+	    (collect a into as)
+	    (collect d into ds)
+	    (finally (return (scons (apply f as) (apply #'smap f ds)))))))
 
 (defun srem (elm l &key (test #'eq))
-  (with-scons (a d) l
-    (if (funcall test elm a)
-	(srem elm d :test test)
-	(scons a (srem elm d :test test)))))
+  (if (null l)
+      nil
+      (with-scons (a d) l
+	(if (funcall test elm a)
+	    (srem elm d :test test)
+	    (scons a (srem elm d :test test))))))
 
 (defun srem-if (pred l)
-  (with-scons (a d) l
-    (if (funcall pred a)
-	(srem-if pred d)
-	(scons a (srem-if pred d)))))
+  (if (null l)
+      nil
+      (with-scons (a d) l
+	(if (funcall pred a)
+	    (srem-if pred d)
+	    (scons a (srem-if pred d))))))
   
 (defun filter (p l)
   (srem-if (lambda (x) (not (funcall p x))) l))
@@ -100,16 +124,28 @@
 (defun nils () (scons nil (nils)))
 
 (defun zip (&rest ls)
-  (reduce (lambda (l1 l2) (smap (lambda (e1 e2) (cons e1 e2)) l1 l2)) ls :from-end t :initial-value (nils)))
+  (if (some #'null ls)
+      nil
+      (reduce (lambda (l1 l2) (smap (lambda (e1 e2) (cons e1 e2)) l1 l2)) ls :from-end t :initial-value (nils))))
 
-(defun nums (&optional (from 0) (by 1)) 
-  (scons from (nums (+ from by) by)))
+(defun sappend (&rest ls)
+  (labels ((sappend1 (l1 l2) (if (null l1)
+				 l2
+				 (with-scons (a d) l1
+				   (scons a (sappend1 d l2))))))
+    (reduce #'sappend1 ls :from-end t :initial-value nil)))
+
+
+(defun nums (&key (from 0) (by 1) (to nil))
+  (if (and to (> from to))
+      nil
+      (scons from (nums :from (+ from by) :by by :to to))))
 
 (defun eratosthenes ()
   (labels ((nmod (n) (lambda (x) (zerop (mod x n))))
 	   (lazy-primes (l) (with-scons (a d) l
 			      (scons a (lazy-primes (srem-if (nmod a) d))))))
-    (lazy-primes (nums 2))))
+    (lazy-primes (nums :from 2))))
 
 (defun primes ()
   (labels ((prime? (n prs) 
@@ -128,24 +164,6 @@
       (scons 2 (lazy-primes 3 (cons a a))))))
 
 (defun collatz (n)
-  (scons n (collatz (if (zerop (mod n 2)) (/ n 2) (1+ (* n 3))))))
-
-#|(defun lazy-fib (a b)
-  (lcons a (lazy-fib b (+ a b))))
-(defun lazy-bonatti (as)
-  (lcons (car as) (lazy-bonatti (append (cdr as) (list (apply #'+ as))))))
-(defun lazy-mod-bonatti (m as)
-  (lcons (car as) (lazy-mod-bonatti m (append (cdr as) (list (mod (apply #'+ as) m))))))
-
-(defun fibs () (lazy-fib 1 1))
-(defun n-bonatti (n) (lazy-bonatti (make-list n :initial-element 1)))
-(defun n-mod-bonatti (n m) (lazy-mod-bonatti m (make-list n :initial-element 1)))
-
-(defun invest-circulation (n m)
-  (let ((es (make-list n :initial-element 1)))
-    (labels ((check (cnt l)
-	       (if (equal (take n l) es)
-		   cnt
-		   (check (1+ cnt) (tail l)))))
-      (check 1 (tail (n-mod-bonatti n m))))))|#
-
+  (if (= n 1)
+      (scons 1 nil)
+      (scons n (collatz (if (zerop (mod n 2)) (/ n 2) (1+ (* n 3)))))))
